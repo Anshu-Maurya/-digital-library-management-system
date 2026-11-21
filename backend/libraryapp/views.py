@@ -1,13 +1,27 @@
 from django.shortcuts import render
+from django.db import transaction
+from django.utils import timezone
 
 from django.contrib.auth import authenticate
-from django.contrib.auth.hashers import check_password
+from django.contrib.auth.hashers import check_password, make_password
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 
 from .models import *
 from .serializers import *
+
+
+def verify_student_password(student, password):
+    if check_password(password, student.password):
+        return True
+
+    if student.password == password:
+        student.password = make_password(password)
+        student.save(update_fields=["password", "updated_at"])
+        return True
+
+    return False
 
 
 @api_view(["POST"])
@@ -386,7 +400,7 @@ def userLogin(request):
             status=status.HTTP_401_UNAUTHORIZED
         )
 
-    if not check_password(password, user.password) and user.password != password:
+    if not verify_student_password(user, password):
         return Response(
             {
                 "success": False,
@@ -490,4 +504,307 @@ def user_list_books(request):
     books = Book.objects.select_related('author','category').prefetch_related("issued_record").all().order_by("titel")
     serializer =BookListSerializers(books,many=True)
     return Response(serializer.data,status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+def user_profile(request):
+    student_id = request.query_params.get("student_id")
+
+    if not student_id:
+        return Response({
+            "success": False,
+            "message": "Student ID parameter is missing"
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        student = Student.objects.get(student_id=student_id)
+    except Student.DoesNotExist:
+        return Response({
+            "success": False,
+            "message": "Student not found"
+        }, status=status.HTTP_404_NOT_FOUND)
+
+    return Response({
+        "success": True,
+        "profile": {
+            "id": student.id,
+            "student_id": student.student_id,
+            "full_name": student.full_name,
+            "email": student.email,
+            "mobile": student.mobile,
+            "is_active": student.is_active,
+            "created_at": student.created_at,
+        }
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+def user_change_password(request):
+    student_id = request.data.get("student_id")
+    email = request.data.get("email")
+    current_password = request.data.get("current_password")
+    new_password = request.data.get("new_password")
+    confirm_password = request.data.get("confirm_password")
+
+    if not all([student_id or email, current_password, new_password, confirm_password]):
+        return Response({
+            "success": False,
+            "message": "All password fields are required"
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    if new_password != confirm_password:
+        return Response({
+            "success": False,
+            "message": "New password and confirm password do not match"
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    if len(new_password) < 8:
+        return Response({
+            "success": False,
+            "message": "Password should be at least 8 characters"
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        if student_id:
+            student = Student.objects.get(student_id=student_id)
+        else:
+            student = Student.objects.get(email=email)
+    except Student.DoesNotExist:
+        return Response({
+            "success": False,
+            "message": "Student not found"
+        }, status=status.HTTP_404_NOT_FOUND)
+
+    if not verify_student_password(student, current_password):
+        return Response({
+            "success": False,
+            "message": "Current password is incorrect"
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    student.password = make_password(new_password)
+    student.save(update_fields=["password", "updated_at"])
+
+    return Response({
+        "success": True,
+        "message": "Password changed successfully"
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@transaction.atomic
+def issue_book(request):
+    student_id = request.data.get("student_id")
+    book_id = request.data.get("book_id")
+
+    if not student_id or not book_id:
+        return Response({
+            "success": False,
+            "message": "Student ID and book ID are required"
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        student = Student.objects.select_for_update().get(student_id=student_id)
+        book = Book.objects.select_for_update().get(id=book_id)
+    except Student.DoesNotExist:
+        return Response({"success": False, "message": "Student not found"}, status=status.HTTP_404_NOT_FOUND)
+    except Book.DoesNotExist:
+        return Response({"success": False, "message": "Book not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    active_issue = IssuedBook.objects.filter(
+        student=student,
+        book=book,
+        is_return=False
+    ).exists()
+    if active_issue:
+        return Response({
+            "success": False,
+            "message": "You already have this book issued"
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    issued_count = IssuedBook.objects.filter(book=book, is_return=False).count()
+    if issued_count >= book.quantity:
+        return Response({
+            "success": False,
+            "message": "This book is not available"
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    issue = IssuedBook.objects.create(student=student, book=book)
+    book.is_issued = True
+    book.save(update_fields=["is_issued", "updated_at"])
+
+    return Response({
+        "success": True,
+        "message": "Book issued successfully",
+        "issue": {
+            "id": issue.id,
+            "issued_at": issue.issued_at,
+        }
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET"])
+def user_issued_books(request):
+    student_id = request.query_params.get("student_id")
+    if not student_id:
+        return Response({
+            "success": False,
+            "message": "Student ID parameter is missing"
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        student = Student.objects.get(student_id=student_id)
+    except Student.DoesNotExist:
+        return Response({"success": False, "message": "Student not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    issues = IssuedBook.objects.select_related("book", "book__author", "book__category").filter(
+        student=student
+    ).order_by("-issued_at")
+
+    data = [{
+        "id": issue.id,
+        "title": issue.book.titel,
+        "author_name": issue.book.author.name,
+        "category_name": issue.book.category.name,
+        "isbn": issue.book.isbn,
+        "issued_at": issue.issued_at,
+        "retrun_at": issue.retrun_at,
+        "is_return": issue.is_return,
+        "fine": issue.fine,
+        "remark": issue.remark,
+    } for issue in issues]
+
+    return Response({"success": True, "issues": data}, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@transaction.atomic
+def return_issued_book(request):
+    student_id = request.data.get("student_id")
+    issue_id = request.data.get("issue_id")
+
+    if not student_id or not issue_id:
+        return Response({
+            "success": False,
+            "message": "Student ID and issue ID are required"
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        student = Student.objects.get(student_id=student_id)
+        issue = IssuedBook.objects.select_for_update().select_related("book").get(
+            id=issue_id,
+            student=student
+        )
+    except Student.DoesNotExist:
+        return Response({"success": False, "message": "Student not found"}, status=status.HTTP_404_NOT_FOUND)
+    except IssuedBook.DoesNotExist:
+        return Response({"success": False, "message": "Issued book not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    if issue.is_return:
+        return Response({
+            "success": False,
+            "message": "This book has already been returned"
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    issue.is_return = True
+    issue.retrun_at = timezone.now()
+    issue.save(update_fields=["is_return", "retrun_at", "updated_at"])
+
+    book = issue.book
+    active_count = IssuedBook.objects.filter(book=book, is_return=False).count()
+    book.is_issued = active_count > 0
+    book.save(update_fields=["is_issued", "updated_at"])
+
+    return Response({
+        "success": True,
+        "message": "Book returned successfully"
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+def admin_issued_books(request):
+    issues = IssuedBook.objects.select_related(
+        "student", "book", "book__author", "book__category"
+    ).order_by("-issued_at")
+
+    data = [{
+        "id": issue.id,
+        "student_id": issue.student.student_id,
+        "student_name": issue.student.full_name,
+        "title": issue.book.titel,
+        "author_name": issue.book.author.name,
+        "category_name": issue.book.category.name,
+        "isbn": issue.book.isbn,
+        "issued_at": issue.issued_at,
+        "retrun_at": issue.retrun_at,
+        "is_return": issue.is_return,
+    } for issue in issues]
+
+    return Response({"success": True, "issues": data}, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+def admin_students(request):
+    students = Student.objects.all().order_by("-created_at")
+
+    data = []
+    for student in students:
+        total_issued = IssuedBook.objects.filter(student=student).count()
+        active_issued = IssuedBook.objects.filter(
+            student=student,
+            is_return=False
+        ).count()
+
+        data.append({
+            "id": student.id,
+            "student_id": student.student_id,
+            "full_name": student.full_name,
+            "email": student.email,
+            "mobile": student.mobile,
+            "is_active": student.is_active,
+            "created_at": student.created_at,
+            "total_issued": total_issued,
+            "active_issued": active_issued,
+        })
+
+    return Response({
+        "success": True,
+        "total_students": len(data),
+        "students": data,
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@transaction.atomic
+def admin_return_issued_book(request):
+    issue_id = request.data.get("issue_id")
+    if not issue_id:
+        return Response({
+            "success": False,
+            "message": "Issue ID is required"
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        issue = IssuedBook.objects.select_for_update().select_related("book").get(id=issue_id)
+    except IssuedBook.DoesNotExist:
+        return Response({"success": False, "message": "Issued book not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    if issue.is_return:
+        return Response({
+            "success": False,
+            "message": "This book has already been returned"
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    issue.is_return = True
+    issue.retrun_at = timezone.now()
+    issue.save(update_fields=["is_return", "retrun_at", "updated_at"])
+
+    book = issue.book
+    active_count = IssuedBook.objects.filter(book=book, is_return=False).count()
+    book.is_issued = active_count > 0
+    book.save(update_fields=["is_issued", "updated_at"])
+
+    return Response({
+        "success": True,
+        "message": "Book return completed"
+    }, status=status.HTTP_200_OK)
      

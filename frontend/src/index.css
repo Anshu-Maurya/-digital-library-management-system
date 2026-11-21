@@ -5,3 +5,10 @@
   --color-primary-hover: #0b5ed7;
   --color-danger: #dc3545;
 }
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}

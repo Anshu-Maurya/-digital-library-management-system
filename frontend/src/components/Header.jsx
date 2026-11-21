@@ -205,7 +205,7 @@ const Header = () => {
                         <span>Manage Book</span>
                       </Link>
                       <Link
-                        to="/admin/category/add"
+                        to="/admin/issued-books"
                         className={submenuLinkClass}
                         onClick={() => setMobileOpen(false)}
                       >
@@ -217,16 +217,16 @@ const Header = () => {
                 </div>
 
                 <Link
-                  to="/admin/dashboard"
-                  className={navButtonClass}
+                  to="/admin/issued-books"
+                  className={`${navButtonClass} ${isActive("/admin/issued-books")}`}
                 >
-                  <i className="fa-solid fa-right-from-bracket w-5 text-center"></i>
-                  <span>Issue Book</span>
+                  <i className="fa-solid fa-arrow-right-arrow-left w-5 text-center"></i>
+                  <span>Issued Books</span>
                 </Link>
 
                 <Link
-                  to="/admin/dashboard"
-                  className={navButtonClass}
+                  to="/admin/students"
+                  className={`${navButtonClass} ${isActive("/admin/students")}`}
                 >
                   <i className="fa-solid fa-users w-5 text-center"></i>
                   <span>Student</span>

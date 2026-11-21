@@ -8,6 +8,7 @@ const StudentBook = () => {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [issuingId, setIssuingId] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -47,10 +48,46 @@ const StudentBook = () => {
     const filterBooks = books.filter(
       (book) =>
         book.title.toLowerCase().includes(term) ||
-        book.author.toLowerCase().includes(term)
+        book.author_name.toLowerCase().includes(term)
     );
     setFilter(filterBooks);
   }, [search, books]);
+
+  const handleIssueBook = async (bookId) => {
+    const storedUser = JSON.parse(localStorage.getItem("studentUser") || "null");
+    if (!storedUser) {
+      navigate("/user/login");
+      return;
+    }
+
+    setIssuingId(bookId);
+    try {
+      const res = await axios.post("http://127.0.0.1:8000/api/user/issue-book/", {
+        student_id: storedUser.student_id,
+        book_id: bookId,
+      });
+      toast.success(res.data.message || "Book issued successfully");
+
+      setBooks((currentBooks) =>
+        currentBooks.map((book) => {
+          if (book.id !== bookId) return book;
+          const availableQuantity = Math.max(
+            0,
+            (book.available_quantity ?? book.quantity) - 1
+          );
+          return {
+            ...book,
+            available_quantity: availableQuantity,
+            is_available: availableQuantity > 0,
+          };
+        })
+      );
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to issue book");
+    } finally {
+      setIssuingId(null);
+    }
+  };
 
   return (
     <div
@@ -135,6 +172,24 @@ const StudentBook = () => {
                     {book.is_available ? "Available" : "Not Available"}
                   </span>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => handleIssueBook(book.id)}
+                  disabled={!book.is_available || issuingId === book.id}
+                  className="mt-4 w-full rounded-lg bg-blue-600 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {issuingId === book.id ? (
+                    <span>
+                      <i className="fa-solid fa-spinner fa-spin mr-2"></i>
+                      Issuing...
+                    </span>
+                  ) : (
+                    <span>
+                      <i className="fa-solid fa-book-medical mr-2"></i>
+                      Issue Book
+                    </span>
+                  )}
+                </button>
               </div>
             ))}
           </div>

@@ -22,7 +22,7 @@ class BookSerializer(serializers.ModelSerializer):
 class UserSignupSerializer(serializers.ModelSerializer):
     class Meta:
         model = Student
-        fields = ["id","mobile","email","password","full_name"]
+        fields = ["id", "student_id", "mobile", "email", "password", "full_name"]
 
     def create(self, validated_data):
         validated_data["password"] = make_password(validated_data["password"])

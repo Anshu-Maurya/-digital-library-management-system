@@ -57,7 +57,7 @@ function AddAuthor() {
       className="py-5 min-h-screen"
       style={{ background: "linear-gradient(135deg, #f3f4ff, #fdfbff)" }}
     >
-      <div className="max-w-5xl mx-auto px-4 min-w-[620px]">
+      <div className="max-w-5xl mx-auto px-4">
         {/* Heading */}
         <div className="text-center mb-6">
           <h4 className="font-semibold mb-1">

@@ -22,8 +22,15 @@ urlpatterns = [
     path("user/signup/",userSignup),
     path("user/login/",userLogin),
     path("user/stats/", user_stats),
-   
     path("user/books/",user_list_books),
+    path("user/profile/", user_profile),
+    path("user/change-password/", user_change_password),
+    path("user/issue-book/", issue_book),
+    path("user/issued-books/", user_issued_books),
+    path("user/return-book/", return_issued_book),
+    path("admin/issued-books/", admin_issued_books),
+    path("admin/students/", admin_students),
+    path("admin/return-book/", admin_return_issued_book),
 
 ]
    
